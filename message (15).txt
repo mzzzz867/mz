@@ -1,0 +1,2211 @@
+-- ╔══════════════════════════════════════════════════════════╗
+-- ║           MZX HUB ULTRA - MUSCLE LEGENDS v2         ║
+-- ║              Enhanced Edition 2026                   ║
+-- ╚══════════════════════════════════════════════════════════╝
+
+-- Services
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local player = Players.LocalPlayer
+
+-- ═══════════════════════════════════════════════════════════
+--                    GLOBAL STATE MANAGER
+-- ═══════════════════════════════════════════════════════════
+local State = {
+    AutoFarm = {
+        Rocks = {},
+        Gym = false,
+        Weight = false,
+        SelectedGym = "Starter Island",
+        SelectedExercise = "Bench Press"
+    },
+    AutoRebirth = {
+        Infinite = false,
+        Target = false,
+        TargetValue = 1
+    },
+    AutoKill = {
+        Enabled = false,
+        FastPunch = false,
+        AutoPunch = false
+    },
+    Player = {
+        Noclip = false,
+        InfiniteJump = false,
+        CustomSpeed = false,
+        WalkspeedValue = 125,
+        AntiKnockback = false,
+        ViewingPlayer = nil
+    },
+    Misc = {
+        AutoSize = false,
+        TPKing = false,
+        AutoChests = false
+        
+    },
+    Stats = {
+        InitialStrength = 0,
+        InitialDurability = 0,
+        InitialKills = 0,
+        StartTime = os.time()
+    }
+}
+
+-- Anti-Knockback Variables
+local antiKnockbackVelocity = nil
+local antiKnockbackConnections = {}
+-- Hide variable
+local p124 = false
+
+-- ═══════════════════════════════════════════════════════════
+--                    UTILITY FUNCTIONS
+-- ═══════════════════════════════════════════════════════════
+
+local function FormatNumber(num)
+    if not num then return "0" end
+    local suffixes = {
+        {1e15, "Qa"},
+        {1e12, "T"},
+        {1e9, "B"},
+        {1e6, "M"},
+        {1e3, "K"}
+    }
+    
+    for _, data in ipairs(suffixes) do
+        if num >= data[1] then
+            return string.format("%.2f%s", num / data[1], data[2])
+        end
+    end
+    return tostring(math.floor(num))
+end
+
+local function Notify(opts)
+    if WindUI and WindUI.Notify then
+        WindUI:Notify(opts)
+    end
+end
+
+local function PressE()
+    VirtualInputManager:SendKeyEvent(true, 'E', false, game)
+    task.wait(0.05)
+    VirtualInputManager:SendKeyEvent(false, 'E', false, game)
+end
+
+local function GetPunchTool()
+    pcall(function()
+        for _, tool in pairs(player.Backpack:GetChildren()) do
+            if tool.Name == 'Punch' and player.Character:FindFirstChild('Humanoid') then
+                player.Character.Humanoid:EquipTool(tool)
+            end
+        end
+        if player:FindFirstChild('muscleEvent') then
+            player.muscleEvent:FireServer('punch', 'leftHand')
+            player.muscleEvent:FireServer('punch', 'rightHand')
+        end
+    end)
+end
+
+local function TeleportTo(cframe)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        player.Character.HumanoidRootPart.CFrame = cframe
+        return true
+    end
+    return false
+end
+
+-- ═══════════════════════════════════════════════════════════
+--                    ANTI-KNOCKBACK SYSTEM
+-- ═══════════════════════════════════════════════════════════
+
+local function EnableAntiKnockback()
+    local char = player.Character
+    if not char then return end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChild("Humanoid")
+    
+    if hrp and hum then
+        antiKnockbackVelocity = Instance.new("BodyVelocity")
+        antiKnockbackVelocity.Velocity = Vector3.new(0, 0, 0)
+        antiKnockbackVelocity.MaxForce = Vector3.new(100000, 0, 100000)
+        antiKnockbackVelocity.Parent = hrp
+        
+        table.insert(antiKnockbackConnections, hrp:GetPropertyChangedSignal("Velocity"):Connect(function()
+            if State.Player.AntiKnockback then
+                hrp.Velocity = Vector3.new(0, hrp.Velocity.Y, 0)
+            end
+        end))
+        
+        table.insert(antiKnockbackConnections, hum:GetPropertyChangedSignal("PlatformStand"):Connect(function()
+            if State.Player.AntiKnockback and hum.PlatformStand then
+                hum.PlatformStand = false
+            end
+        end))
+    end
+end
+
+local function DisableAntiKnockback()
+    if antiKnockbackVelocity then
+        antiKnockbackVelocity:Destroy()
+        antiKnockbackVelocity = nil
+    end
+    
+    for _, conn in ipairs(antiKnockbackConnections) do
+        conn:Disconnect()
+    end
+    antiKnockbackConnections = {}
+end
+
+-- ═══════════════════════════════════════════════════════════
+--                    UI INITIALIZATION
+-- ═══════════════════════════════════════════════════════════
+
+local WindUI = loadstring(game:HttpGet(
+    "https://gist.githubusercontent.com/mzxkz/15cedd88700793c670db13a9d33e06de/raw/17f2ce272257b309613ad035991e9be0a40a34cd/main.lua"
+))()
+WindUI:AddTheme({
+    Name = "Criminal", -- nome do tema (só label, não afeta visual)
+
+    Accent = Color3.fromHex("#800020"), -- cor principal de destaque (botões ativos, foco, detalhes importantes)
+    Background = Color3.fromHex("#0b0b0e"), -- fundo geral da UI
+    BackgroundTransparency = 0, -- transparência do fundo (0 = sólido)
+
+    Outline = Color3.fromHex("#800020"), -- bordas de janelas, elementos e separações
+    Text = Color3.fromHex("#e5e5e5"), -- texto principal
+    Placeholder = Color3.fromHex("#71717a"), -- texto de placeholder (inputs vazios)
+
+    Button = Color3.fromHex("#800020"), -- fundo dos botões
+    Icon = Color3.fromHex("#800020"), -- cor padrão dos ícones
+    Hover = Color3.fromHex("#a0002d"), -- cor quando passa o mouse (hover)
+
+    WindowBackground = Color3.fromHex("#0b0b0e"), -- fundo da janela principal
+    WindowShadow = Color3.fromHex("#800020"), -- sombra da janela
+
+    DialogBackground = Color3.fromHex("#111113"), -- fundo de dialogs/modais
+    DialogBackgroundTransparency = 0, -- transparência do dialog
+    DialogTitle = Color3.fromHex("#fafafa"), -- título do dialog
+    DialogContent = Color3.fromHex("#d4d4d8"), -- texto do dialog
+    DialogIcon = Color3.fromHex("#800020"), -- ícone do dialog
+
+    WindowTopbarButtonIcon = Color3.fromHex("#800020"), -- ícones dos botões da topbar
+    WindowTopbarTitle = Color3.fromHex("#800020"), -- título da janela
+    WindowTopbarAuthor = Color3.fromHex("#71717a"), -- autor/subtítulo da topbar
+    WindowTopbarIcon = Color3.fromHex("#800020"), -- ícone principal da janela
+
+    TabBackground = Color3.fromHex("#800020"), -- fundo das abas
+    TabTitle = Color3.fromHex("#e5e5e5"), -- texto das abas
+    TabIcon = Color3.fromHex("#800020"), -- ícones das abas
+
+    ElementBackground = Color3.fromHex("#800020"), -- fundo dos elementos (toggles, sliders, etc)
+    ElementTitle = Color3.fromHex("#fafafa"), -- título dos elementos
+    ElementDesc = Color3.fromHex("#a1a1aa"), -- descrição dos elementos
+    ElementIcon = Color3.fromHex("#800020"), -- ícone dos elementos
+
+    PopupBackground = Color3.fromHex("#0f0f12"), -- fundo de popups
+    PopupBackgroundTransparency = 0, -- transparência do popup
+    PopupTitle = Color3.fromHex("#fafafa"), -- título do popup
+    PopupContent = Color3.fromHex("#d4d4d8"), -- texto do popup
+    PopupIcon = Color3.fromHex("#800020"), -- ícone do popup
+
+    Toggle = Color3.fromHex("#800020"), -- toggle ligado
+    ToggleBar = Color3.fromHex("#3f0010"), -- barra do toggle desligado
+
+    Checkbox = Color3.fromHex("#1f1f24"), -- fundo do checkbox
+    CheckboxIcon = Color3.fromHex("#800020"), -- ícone do checkbox marcado
+
+    Slider = Color3.fromHex("#1f1f24"), -- trilho do slider
+    SliderThumb = Color3.fromHex("#800020"), -- bolinha do slider
+})
+
+
+local Window = WindUI:CreateWindow({
+    Title = "🔪 CRIMINAL | Muscle Legends",  
+    Icon = "layers",
+    Author = "discord.gg/NuW8BsNray",
+    Folder = "CriminalHub",
+    Background = "rbxassetid://91806796893972",
+    Size = UDim2.fromOffset(620, 500),
+    MinSize = Vector2.new(580, 380),
+    MaxSize = Vector2.new(900, 650),
+    Transparent = true,
+    Theme = "Criminal",
+    Resizable = true,
+    SideBarWidth = 210,
+    BackgroundImageTransparency = 0.8,
+    HideSearchBar = false,
+    ScrollBarEnabled = true,
+    User = {
+        Enabled = true,
+        Anonymous = false,
+        Callback = function()
+            print("clicked")
+        end,
+    },
+})
+
+Window:EditOpenButton({
+    Title = "CRIMINAL |🩸💉",
+    Icon = "monitor",
+    CornerRadius = UDim.new(0, 16),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(
+        Color3.fromHex("#000000"),
+        Color3.fromHex("#FF0000")
+    ),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = true,
+    AnchorPoint = Vector2.new(1, 0),
+    Position = UDim2.new(1, -118, 0, 30)
+})
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: AUTO FARM
+-- ═══════════════════════════════════════════════════════════
+local farmTab = Window:Tab({Title = "Main", Icon = "house-plus"})
+
+local gymSection = farmTab:Section({ 
+    Title = "🩸 Gym Training System",
+    Box = false,
+    Opened = true,
+})
+
+local gymLocations = {
+    ['Bench Press'] = {
+        ['Starter Island'] = CFrame.new(-17.06, 3.31, -2.48),
+        ['Frost Gym'] = CFrame.new(-3013.24, 39.21, -335.03),
+        ['Mythical Gym'] = CFrame.new(2371.73, 39.21, 1246.31),
+        ['Legend Gym'] = CFrame.new(4111.91, 1020.46, -3799.97),
+        ['Muscle King Gym'] = CFrame.new(-8590.06, 46.01, -6043.34),
+    },
+    ['Squat'] = {
+        ['Starter Island'] = CFrame.new(-48.87, 3.31, -11.88),
+        ['Frost Gym'] = CFrame.new(-2933.47, 29.63, -579.94),
+        ['Mythical Gym'] = CFrame.new(2489.21, 3.67, 849.05),
+        ['Legend Gym'] = CFrame.new(4304.99, 987.82, -4124.23),
+        ['Muscle King Gym'] = CFrame.new(-8940.12, 13.16, -5699.13),
+    },
+}
+
+gymSection:Dropdown({
+    Title = "🏋️ Exercise Type",
+    Desc = "Choose your training exercise",
+    Icon = "dumbbell",
+    Values = {"Bench Press", "Squat"},
+    Callback = function(value)
+        State.AutoFarm.SelectedExercise = value
+    end
+})
+
+gymSection:Dropdown({
+    Title = "🏛️ Gym Location",
+    Desc = "Select gym based on your level",
+    Icon = "map-pin",
+    Values = {"Starter Island", "Frost Gym", "Mythical Gym", "Legend Gym", "Muscle King Gym"},
+    Callback = function(value)
+        State.AutoFarm.SelectedGym = value
+    end
+})
+
+gymSection:Toggle({
+    Title = "🎯 Auto Farm Gym",
+    Desc = "Automatically train at selected gym",
+    Icon = "target",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.AutoFarm.Gym = state
+        if state then
+            task.spawn(function()
+                local targetCFrame = gymLocations[State.AutoFarm.SelectedExercise][State.AutoFarm.SelectedGym]
+                if targetCFrame and TeleportTo(targetCFrame) then
+                    task.wait(0.5)
+                    PressE()
+                    while State.AutoFarm.Gym do
+                        pcall(function()
+                            if player:FindFirstChild('muscleEvent') then
+                                player.muscleEvent:FireServer('rep')
+                            end
+                        end)
+                        task.wait(0.05)
+                    end
+                end
+            end)
+        end
+    end
+})
+
+-- NEW: Auto Weight Training
+local weightSection = farmTab:Section({ 
+    Title = "🏋️ Weight Training",
+    Box = false,
+    Opened = true,
+})
+
+weightSection:Toggle({
+    Title = "💪 Auto Weight",
+    Desc = "Automatically lift weights",
+    Icon = "dumbbell",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoWeight = state
+        if state then
+            local weight = player.Backpack:FindFirstChild('Weight')
+            if weight then
+                player.Character.Humanoid:EquipTool(weight)
+            end
+        else
+            local weight = player.Character:FindFirstChild('Weight')
+            if weight then
+                weight.Parent = player.Backpack
+            end
+        end
+        
+        while _G.AutoWeight do
+            player.muscleEvent:FireServer('rep')
+            task.wait(0.001)
+        end
+    end
+})
+
+weightSection:Toggle({
+    Title = "🤸 Auto Pushups",
+    Desc = "Automatically do pushups",
+    Icon = "activity",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoPushups = state
+        if state then
+            local pushups = player.Backpack:FindFirstChild('Pushups')
+            if pushups then
+                player.Character.Humanoid:EquipTool(pushups)
+            end
+        else
+            local pushups = player.Character:FindFirstChild('Pushups')
+            if pushups then
+                pushups.Parent = player.Backpack
+            end
+        end
+        
+        while _G.AutoPushups do
+            player.muscleEvent:FireServer('rep')
+            task.wait(0.001)
+        end
+    end
+})
+
+weightSection:Toggle({
+    Title = "🤚 Auto Handstands",
+    Desc = "Automatically do handstands",
+    Icon = "hand",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoHandstands = state
+        if state then
+            local handstands = player.Backpack:FindFirstChild('Handstands')
+            if handstands then
+                player.Character.Humanoid:EquipTool(handstands)
+            end
+        else
+            local handstands = player.Character:FindFirstChild('Handstands')
+            if handstands then
+                handstands.Parent = player.Backpack
+            end
+        end
+        
+        while _G.AutoHandstands do
+            player.muscleEvent:FireServer('rep')
+            task.wait(0.001)
+        end
+    end
+})
+
+weightSection:Toggle({
+    Title = "🧘 Auto Situps",
+    Desc = "Automatically do situps",
+    Icon = "user",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoSitups = state
+        if state then
+            local situps = player.Backpack:FindFirstChild('Situps')
+            if situps then
+                player.Character.Humanoid:EquipTool(situps)
+            end
+        else
+            local situps = player.Character:FindFirstChild('Situps')
+            if situps then
+                situps.Parent = player.Backpack
+            end
+        end
+        
+        while _G.AutoSitups do
+            player.muscleEvent:FireServer('rep')
+            task.wait(0.001)
+        end
+    end
+})
+
+weightSection:Toggle({
+    Title = "⚡ Fast Tools Speed",
+    Desc = "Speed up all training tools",
+    Icon = "zap",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.FastTools = state
+        
+        local tools = {
+            {'Punch', 'attackTime', state and 0 or 0.35},
+            {'Ground Slam', 'attackTime', state and 0 or 6},
+            {'Stomp', 'attackTime', state and 0 or 7},
+            {'Handstands', 'repTime', state and 0 or 1},
+            {'Pushups', 'repTime', state and 0 or 1},
+            {'Weight', 'repTime', state and 0 or 1},
+            {'Situps', 'repTime', state and 0 or 1},
+        }
+        
+        for _, toolData in ipairs(tools) do
+            local tool = player.Backpack:FindFirstChild(toolData[1])
+            if tool and tool:FindFirstChild(toolData[2]) then
+                tool[toolData[2]].Value = toolData[3]
+            end
+            
+            local charTool = player.Character:FindFirstChild(toolData[1])
+            if charTool and charTool:FindFirstChild(toolData[2]) then
+                charTool[toolData[2]].Value = toolData[3]
+            end
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: GLITCH SYSTEM
+-- ═══════════════════════════════════════════════════════════
+-- 🔰 GLITCH TAB
+local glitchTab = Window:Tab({Title = "Glitch", Icon = "mountain"})
+
+
+-- 🪨 ROCK SECTION
+local rockSection = glitchTab:Section({ 
+    Title = "👊 Rock Training System",
+    Box = false,
+    Opened = true,
+})
+
+-- ===============================
+-- UTILS
+-- ===============================
+local function HasRockSelected()
+    for _, isActive in pairs(State.AutoFarm.Rocks) do
+        if isActive then
+            return true
+        end
+    end
+    return false
+end
+
+local function UpdateFastPunch()
+    local active = HasRockSelected()
+    _G.UltraFastPunch = active
+
+    local punchTool = player.Backpack:FindFirstChild("Punch") or player.Character:FindFirstChild("Punch")
+    if punchTool and punchTool:FindFirstChild("attackTime") then
+        punchTool.attackTime.Value = active and 0 or 0.35
+    end
+end
+
+-- ===============================
+-- FAST PUNCH LOOP (GLOBAL)
+-- ===============================
+task.spawn(function()
+    while true do
+        if _G.UltraFastPunch then
+            pcall(function()
+                local punchTool = player.Backpack:FindFirstChild("Punch") or player.Character:FindFirstChild("Punch")
+                if punchTool then
+                    if punchTool.Parent ~= player.Character and player.Character:FindFirstChild("Humanoid") then
+                        player.Character.Humanoid:EquipTool(punchTool)
+                    end
+                    punchTool:Activate()
+                end
+            end)
+        end
+        task.wait()
+    end
+end)
+
+-- ===============================
+-- ROCK DATA
+-- ===============================
+local rockData = {
+    {name = "Tiny Island", dur = 0, color = "🟢"},
+    {name = "Starter Island", dur = 100, color = "🟢"},
+    {name = "Legend Beach", dur = 5000, color = "🟡"},
+    {name = "Frost Gym", dur = 150000, color = "🟠"},
+    {name = "Mythical Gym", dur = 400000, color = "🟠"},
+    {name = "Eternal Gym", dur = 750000, color = "🔴"},
+    {name = "Legend Gym", dur = 1000000, color = "🔴"},
+    {name = "Muscle King", dur = 5000000, color = "⚫"},
+    {name = "Ancient Jungle", dur = 10000000, color = "⚫"}
+}
+
+-- ===============================
+-- ROCK TOGGLES
+-- ===============================
+for _, rock in ipairs(rockData) do
+    rockSection:Toggle({
+        Title = rock.color .. " " .. rock.name,
+        Desc = "Required Durability: " .. FormatNumber(rock.dur),
+        Icon = "mountain",
+        Type = "Checkbox",
+        Value = false,
+        Callback = function(state)
+            State.AutoFarm.Rocks[rock.dur] = state
+            UpdateFastPunch()
+
+            if state then
+                task.spawn(function()
+                    while State.AutoFarm.Rocks[rock.dur] do
+                        pcall(function()
+                            if player:FindFirstChild("Durability")
+                            and player.Durability.Value >= rock.dur then
+                                for _, obj in pairs(Workspace.machinesFolder:GetDescendants()) do
+                                    if obj.Name == "neededDurability"
+                                    and obj.Value == rock.dur
+                                    and obj.Parent
+                                    and obj.Parent:FindFirstChild("Rock") then
+
+                                        local leftHand = player.Character:FindFirstChild("LeftHand")
+                                        local rightHand = player.Character:FindFirstChild("RightHand")
+
+                                        if leftHand and rightHand then
+                                            firetouchinterest(obj.Parent.Rock, rightHand, 0)
+                                            firetouchinterest(obj.Parent.Rock, rightHand, 1)
+                                            firetouchinterest(obj.Parent.Rock, leftHand, 0)
+                                            firetouchinterest(obj.Parent.Rock, leftHand, 1)
+                                            GetPunchTool()
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(0.3)
+                    end
+                end)
+            end
+        end
+    })
+end
+
+ 
+ -- ═══════════════════════════════════════════════════════════
+--                    TAB: REBIRTH SYSTEM (MOVED HERE)
+-- ═══════════════════════════════════════════════════════════
+local rebirthTab = Window:Tab({Title = "Rebirth", Icon = "refresh-cw"})
+
+local rebirthSection = rebirthTab:Section({ 
+    Title = "♻️ Rebirth Management",
+    Box = false,
+    Opened = true,
+})
+
+rebirthSection:Input({
+    Title = "🎯 Target Rebirth Count",
+    Desc = "Set your rebirth goal",
+    Value = "1",
+    Callback = function(value)
+        State.AutoRebirth.TargetValue = tonumber(value) or 1
+    end
+})
+
+rebirthSection:Toggle({
+    Title = "🎯 Auto Rebirth (Target)",
+    Desc = "Rebirth until target is reached",
+    Icon = "target",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.AutoRebirth.Target = state
+        if state then
+            task.spawn(function()
+                while State.AutoRebirth.Target and player.leaderstats and player.leaderstats.Rebirths do
+                    if player.leaderstats.Rebirths.Value >= State.AutoRebirth.TargetValue then
+                        Notify({
+                            Title = "🎉 Target Reached!",
+                            Content = "Achieved " .. State.AutoRebirth.TargetValue .. " rebirths!",
+                            Duration = 5
+                        })
+                        break
+                    end
+                    pcall(function()
+                        ReplicatedStorage.rEvents.rebirthRemote:InvokeServer('rebirthRequest')
+                    end)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+rebirthSection:Toggle({
+    Title = "♾️ Infinite Rebirth",
+    Desc = "Never stop rebirthing",
+    Icon = "infinity",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.AutoRebirth.Infinite = state
+        if state then
+            task.spawn(function()
+                while State.AutoRebirth.Infinite do
+                    pcall(function()
+                        ReplicatedStorage.rEvents.rebirthRemote:InvokeServer('rebirthRequest')
+                    end)
+                    task.wait(0.1)
+                end
+            end)
+        end
+    end
+})
+
+local miscRebirthSection = rebirthTab:Section({ 
+    Title = "⚙️ Additional Options",
+    Box = false,
+    Opened = true,
+})
+
+miscRebirthSection:Toggle({
+    Title = "📏 Auto Size 1",
+    Desc = "Keep character size at minimum",
+    Icon = "minimize-2",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Misc.AutoSize = state
+        if state then
+            task.spawn(function()
+                while State.Misc.AutoSize do
+                    pcall(function()
+                        ReplicatedStorage.rEvents.changeSpeedSizeRemote:InvokeServer('changeSize', 1)
+                    end)
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+})
+
+miscRebirthSection:Toggle({
+    Title = "👑 Auto TP Muscle King",
+    Desc = "Teleport to Muscle King location",
+    Icon = "crown",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Misc.TPKing = state
+        if state then
+            task.spawn(function()
+                while State.Misc.TPKing do
+                    TeleportTo(CFrame.new(-8646, 17, -5738))
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: AUTO GYM ADVANCED
+-- ═══════════════════════════════════════════════════════════
+Window:Divider()
+local advGymTab = Window:Tab({Title = "Advanced Gym", Icon = "dumbbell"})
+
+local gymMachines = {
+    ['Bench Press'] = {
+        ['Starter Island'] = CFrame.new(-17.06, 3.31, -2.48),
+        ['Legend Beach'] = CFrame.new(470.33, 3.31, -321.05),
+        ['Frost Gym'] = CFrame.new(-3013.24, 39.21, -335.03),
+        ['Mythical Gym'] = CFrame.new(2371.73, 39.21, 1246.31),
+        ['Eternal Gym'] = CFrame.new(-7176.19, 45.39, -1106.31),
+        ['Legend Gym'] = CFrame.new(4111.91, 1020.46, -3799.97),
+        ['Muscle King Gym'] = CFrame.new(-8590.06, 46.01, -6043.34),
+        ['Jungle Gym'] = CFrame.new(-8173, 64, 1898),
+    },
+    ['Squat'] = {
+        ['Starter Island'] = CFrame.new(-48.87, 3.31, -11.88),
+        ['Legend Beach'] = CFrame.new(470.33, 3.31, -321.05),
+        ['Frost Gym'] = CFrame.new(-2933.47, 29.63, -579.94),
+        ['Mythical Gym'] = CFrame.new(2489.21, 3.67, 849.05),
+        ['Eternal Gym'] = CFrame.new(-7176.19, 45.39, -1106.31),
+        ['Legend Gym'] = CFrame.new(4304.99, 987.82, -4124.23),
+        ['Muscle King Gym'] = CFrame.new(-8940.12, 13.16, -5699.13),
+        ['Jungle Gym'] = CFrame.new(-8352, 34, 2878),
+    },
+    ['Pull Up'] = {
+        ['Starter Island'] = CFrame.new(-33.30, 3.31, -11.88),
+        ['Frost Gym'] = CFrame.new(-2933.47, 29.63, -579.94),
+        ['Mythical Gym'] = CFrame.new(2489.21, 3.67, 849.05),
+        ['Legend Gym'] = CFrame.new(4304.99, 987.82, -4124.23),
+        ['Muscle King Gym'] = CFrame.new(-8940.12, 13.16, -5699.13),
+        ['Jungle Gym'] = CFrame.new(-8666, 34, 2070),
+    },
+    ['Boulder'] = {
+        ['Legend Gym'] = CFrame.new(4304.99, 987.82, -4124.23),
+        ['Muscle King Gym'] = CFrame.new(-8940.12, 13.16, -5699.13),
+        ['Jungle Gym'] = CFrame.new(-8621, 34, 2684),
+    },
+}
+
+local selectedMachine = "Bench Press"
+local selectedGymLoc = "Starter Island"
+
+for machineName, locations in pairs(gymMachines) do
+    local machineSection = advGymTab:Section({ 
+        Title = "🏋️ " .. machineName,
+        Box = false,
+        Opened = true,
+    })
+    
+    local gymList = {}
+    for gymName, _ in pairs(locations) do
+        table.insert(gymList, gymName)
+    end
+    
+    machineSection:Dropdown({
+        Title = "📍 Select Gym",
+        Desc = "Choose gym location",
+        Icon = "map-pin",
+        Values = gymList,
+        Callback = function(value)
+            selectedGymLoc = value
+        end
+    })
+    
+    machineSection:Toggle({
+        Title = "🎯 Auto " .. machineName,
+        Desc = "Automatically train " .. machineName,
+        Icon = "target",
+        Type = "Checkbox",
+        Value = false,
+        Callback = function(state)
+            _G["Auto" .. machineName:gsub(" ", "")] = state
+            if state then
+                task.spawn(function()
+                    local targetCFrame = gymMachines[machineName][selectedGymLoc]
+                    if targetCFrame and TeleportTo(targetCFrame) then
+                        task.wait(0.5)
+                        PressE()
+                        while _G["Auto" .. machineName:gsub(" ", "")] do
+                            player.muscleEvent:FireServer('rep')
+                            task.wait(0.03)
+                        end
+                    end
+                end)
+            end
+        end
+    })
+end
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: ADVANCED FEATURES
+-- ═══════════════════════════════════════════════════════════
+local advTab = Window:Tab({Title = "Advanced", Icon = "zap"})
+
+local fastRebirthSection = advTab:Section({ 
+    Title = "🚀 Ultra Fast Rebirth",
+    Box = false,
+    Opened = true,
+})
+
+local targetRebirthCount = math.huge
+
+fastRebirthSection:Input({
+    Title = "🎯 Target Rebirth",
+    Desc = "Farm stops at this count",
+    Value = "50000",
+    Callback = function(value)
+        targetRebirthCount = tonumber(value) or math.huge
+    end
+})
+
+fastRebirthSection:Toggle({
+    Title = "⚡ Ultra Fast Rebirth",
+    Desc = "Fastest rebirth method using Jungle Gym",
+    Icon = "zap-off",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.UltraFastRebirth = state
+        if state then
+            task.spawn(function()
+                while _G.UltraFastRebirth do
+                    local requiredStr = 10000 + (5000 * player.leaderstats.Rebirths.Value)
+                    
+                    -- Check for Golden Rebirth ultimate
+                    if player.ultimatesFolder:FindFirstChild('Golden Rebirth') then
+                        local discount = player.ultimatesFolder['Golden Rebirth'].Value
+                        requiredStr = math.floor(requiredStr * (1 - discount * 0.1))
+                    end
+                    
+                    -- Teleport to Jungle Bar Lift
+                    local jungleLift = Workspace.machinesFolder:FindFirstChild('Jungle Bar Lift')
+                    if jungleLift and jungleLift:FindFirstChild('interactSeat') then
+                        if player.Character and player.Character:FindFirstChild('HumanoidRootPart') then
+                            player.Character.HumanoidRootPart.CFrame = jungleLift.interactSeat.CFrame * CFrame.new(0, 3, 0)
+                            task.wait(0.3)
+                            PressE()
+                        end
+                    end
+                    
+                    -- Farm strength
+                    while _G.UltraFastRebirth and player.leaderstats.Strength.Value < requiredStr do
+                        player.muscleEvent:FireServer('rep')
+                        task.wait(0.03)
+                    end
+                    
+                    -- Rebirth when ready
+                    if player.leaderstats.Strength.Value >= requiredStr then
+                        task.wait(0.2)
+                        ReplicatedStorage.rEvents.rebirthRemote:InvokeServer('rebirthRequest')
+                    end
+                    
+                    if not _G.UltraFastRebirth then break end
+                    task.wait(0.05)
+                end
+            end)
+        end
+    end
+})
+
+local brawlSection = advTab:Section({ 
+    Title = "⚔️ Brawl System",
+    Box = false,
+    Opened = true,
+})
+
+brawlSection:Toggle({
+    Title = "🥊 Auto Join Brawl",
+    Desc = "Automatically join brawls",
+    Icon = "crosshair",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoBrawl = state
+        while _G.AutoBrawl do
+            ReplicatedStorage.rEvents.brawlEvent:FireServer('joinBrawl')
+            task.wait(0.5)
+        end
+    end
+})
+
+local eggSection = advTab:Section({ 
+    Title = "🥚 Protein Egg Auto Use",
+    Box = false,
+    Opened = true,
+})
+
+local function UseProteinEgg()
+    local egg = player.Backpack:FindFirstChild('Protein Egg')
+    if not egg then return false end
+    
+    egg.Parent = player.Character
+    task.wait(0.1)
+    
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+    task.wait(0.5)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    
+    return true
+end
+
+eggSection:Toggle({
+    Title = "🥚 Auto Protein Egg",
+    Desc = "Uses egg when timer is low (2 seconds)",
+    Icon = "egg",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoEgg = state
+        while _G.AutoEgg do
+            local boostFolder = player:FindFirstChild('boostTimersFolder')
+            if boostFolder then
+                local eggBoost = boostFolder:FindFirstChild('Protein Egg')
+                if eggBoost then
+                    if tonumber(eggBoost.Value) <= 2 then
+                        UseProteinEgg()
+                    end
+                    task.wait(1)
+                else
+                    UseProteinEgg()
+                    task.wait(1)
+                end
+            else
+                UseProteinEgg()
+                task.wait(1)
+            end
+        end
+    end
+})
+
+
+-- ═══════════════════════════════════════════════════════════
+--                 TAB: KILLER ENHANCEMENTS  
+-- ═══════════════════════════════════════════════════════════
+local combatTab = Window:Tab({Title = "Combat", Icon = "crosshair"})
+
+local combatSection = combatTab:Section({ 
+    Title = "💀 Combat Enhancements",
+    Box = false,
+    Opened = true,
+})
+
+-- Variáveis globais
+local killRadius = 75
+local whitelistedPlayers = {}
+local State = {
+    AutoKill = {
+        Enabled = false,
+        FastPunch = false,
+        Interval = 0.1
+    },
+    MatrixKillAura = false
+}
+
+-- Função para verificar se o player é amigo ou está na lista manual
+local function isProtected(targetPlayer)
+    if whitelistedPlayers[targetPlayer.Name] then return true end
+    if player:IsFriendsWith(targetPlayer.UserId) then return true end
+    return false
+end
+
+-- Função de ataque otimizada
+local function attackTarget(targetCharacter, hand)
+    if not targetCharacter or not hand then return end
+    
+    local humanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
+    local hrp = targetCharacter:FindFirstChild("HumanoidRootPart")
+    
+    if humanoid and humanoid.Health > 0 and hrp then
+        firetouchinterest(hrp, hand, 1)
+        firetouchinterest(hrp, hand, 0)
+        return true
+    end
+    return false
+end
+
+combatSection:Input({
+    Title = "📏 Kill Aura Radius",
+    Desc = "Set radius (1-150)",
+    Value = "75",
+    Callback = function(value)
+        killRadius = math.clamp(tonumber(value) or 75, 1, 150)
+        Notify({
+            Title = "📏 Radius Updated",
+            Content = "Kill aura radius: " .. killRadius,
+            Duration = 2
+        })
+    end
+})
+
+-- MATRIX KILL AURA (Com efeitos visuais)
+combatSection:Toggle({
+    Title = "💀 Matrix Kill Aura",
+    Desc = "Ataque em área com efeitos visuais",
+    Icon = "crosshair",
+    Value = false,
+    Callback = function(state)
+        State.MatrixKillAura = state
+        
+        if state then
+            -- Criar partícula de área
+            local radiusPart = Instance.new('Part')
+            radiusPart.Name = "KillAuraRadius"
+            radiusPart.Anchored = true
+            radiusPart.CanCollide = false
+            radiusPart.Transparency = 0.7
+            radiusPart.Material = Enum.Material.ForceField
+            radiusPart.Color = Color3.fromRGB(0, 255, 0)
+            radiusPart.Size = Vector3.new(killRadius * 2, 0.1, killRadius * 2)
+            
+            local connection
+            connection = RunService.Heartbeat:Connect(function()
+                if not State.MatrixKillAura then
+                    connection:Disconnect()
+                    radiusPart:Destroy()
+                    return
+                end
+                
+                local char = player.Character
+                local hrp = char and char:FindFirstChild('HumanoidRootPart')
+                local hand = char and (char:FindFirstChild('RightHand') or char:FindFirstChild('LeftHand'))
+                
+                if hrp and hand then
+                    -- Atualizar posição do indicador
+                    radiusPart.Parent = Workspace
+                    radiusPart.CFrame = hrp.CFrame * CFrame.new(0, -2.5, 0)
+                    
+                    -- Atacar jogadores no raio
+                    for _, targetPlayer in ipairs(Players:GetPlayers()) do
+                        if targetPlayer ~= player and not isProtected(targetPlayer) then
+                            local targetChar = targetPlayer.Character
+                            if targetChar then
+                                local targetHrp = targetChar:FindFirstChild('HumanoidRootPart')
+                                
+                                if targetHrp and (targetHrp.Position - hrp.Position).Magnitude <= killRadius then
+                                    -- Efeito visual Matrix
+                                    local effect = Instance.new('Part')
+                                    effect.Anchored = true
+                                    effect.CanCollide = false
+                                    effect.Material = Enum.Material.Neon
+                                    effect.Color = Color3.fromRGB(0, 255, 0)
+                                    effect.CFrame = targetHrp.CFrame * CFrame.new(0, 0, 0)
+                                    effect.Size = Vector3.new(3, 3, 3)
+                                    effect.Parent = Workspace
+                                    
+                                    local tween = game:GetService('TweenService'):Create(effect, TweenInfo.new(0.5), {
+                                        Size = Vector3.new(0.1, 0.1, 0.1),
+                                        Transparency = 1
+                                    })
+                                    tween:Play()
+                                    
+                                    game.Debris:AddItem(effect, 0.5)
+                                    
+                                    -- Ataque
+                                    attackTarget(targetChar, hand)
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--          SEÇÃO AUTO KILL ATUALIZADA (INTEGRADA)
+-- ═══════════════════════════════════════════════════════════
+
+local combatSection = combatTab:Section({ 
+    Title = "💀 Combat Enhancements",
+    Box = false,
+    Opened = true,
+})
+
+-- Função auxiliar interna para garantir o soco e o evento
+local function ExecuteKill(targetPlayer)
+    local char = player.Character
+    local hand = char and (char:FindFirstChild("LeftHand") or char:FindFirstChild("Left Arm"))
+    local targetHrp = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+    if hand and targetHrp then
+        -- 1. Garante que o soco está equipado
+        local tool = player.Backpack:FindFirstChild('Punch') or char:FindFirstChild('Punch')
+        if tool and tool.Parent ~= char then
+            tool.Parent = char
+        end
+
+        -- 2. Simula o toque físico
+        firetouchinterest(targetHrp, hand, 0)
+        task.wait()
+        firetouchinterest(targetHrp, hand, 1)
+
+        -- 3. Dispara o evento de soco do servidor
+        if player:FindFirstChild('muscleEvent') then
+            player.muscleEvent:FireServer('punch', 'leftHand')
+        end
+    end
+end
+
+combatSection:Toggle({
+    Title = "🩸 Auto Kill All (Tested)",
+    Desc = "Kills everyone on the server using verified logic",
+    Icon = "skull",
+    Value = false,
+    Callback = function(state)
+        State.AutoKill.Enabled = state 
+        
+        if state then
+            task.spawn(function()
+                while State.AutoKill.Enabled do
+                    for _, p in ipairs(game.Players:GetPlayers()) do
+                        if p ~= player and p.Character then
+                            ExecuteKill(p)
+                        end
+                    end
+                    -- Velocidade ajustável baseada no State
+                    task.wait(State.AutoKill.FastPunch and 0.01 or 0.2)
+                end
+            end)
+        end
+    end
+})
+-- FAST KILL
+combatSection:Toggle({
+    Title = "⚡ Fast Kill Mode",
+    Desc = "Torna os ataques extremamente rápidos",
+    Icon = "zap",
+    Value = false,
+    Callback = function(state)
+        State.AutoKill.FastPunch = state
+        Notify({
+            Title = "⚡ Fast Mode",
+            Content = state and "Ativado" or "Desativado",
+            Duration = 2
+        })
+    end
+})
+
+-- WHITELIST MANAGER
+combatSection:Button({
+    Title = "🛡️ Auto Whitelist Friends",
+    Desc = "Adiciona seus amigos à lista de proteção",
+    Icon = "users",
+    Callback = function()
+        local count = 0
+        table.clear(whitelistedPlayers)
+        
+        for _, targetPlayer in ipairs(Players:GetPlayers()) do
+            if targetPlayer ~= player then
+                local success, isFriend = pcall(function()
+                    return player:IsFriendsWith(targetPlayer.UserId)
+                end)
+                
+                if success and isFriend then
+                    whitelistedPlayers[targetPlayer.Name] = true
+                    count = count + 1
+                end
+            end
+        end
+        
+        Notify({
+            Title = "🛡️ Whitelist",
+            Content = string.format("%d amigos protegidos!", count),
+            Duration = 3
+        })
+    end
+})
+
+combatSection:Button({
+    Title = "❌ Clear Whitelist",
+    Desc = "Remove todos da lista de proteção",
+    Icon = "trash-2",
+    Callback = function()
+        table.clear(whitelistedPlayers)
+        Notify({
+            Title = "🛡️ Whitelist",
+            Content = "Lista de proteção limpa!",
+            Duration = 2
+        })
+    end
+})
+
+-- DEBUG: Mostrar lista de protegidos
+combatSection:Button({
+    Title = "📋 Ver Whitelist",
+    Desc = "Mostra quem está protegido",
+    Icon = "list",
+    Callback = function()
+        local protectedList = ""
+        local count = 0
+        
+        for playerName, _ in pairs(whitelistedPlayers) do
+            protectedList = protectedList .. "• " .. playerName .. "\n"
+            count = count + 1
+        end
+        
+        if count == 0 then
+            protectedList = "Nenhum jogador protegido"
+        end
+        
+        Notify({
+            Title = "📋 Whitelist (" .. count .. " jogadores)",
+            Content = protectedList,
+            Duration = 5
+        })
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: CRYSTALS
+-- ═══════════════════════════════════════════════════════════
+Window:Divider()
+local crystalsTab = Window:Tab({Title = "Crystals", Icon = "gem"})
+
+local crystalSection = crystalsTab:Section({ 
+    Title = "💎 Crystal Opening",
+    Box = false,
+    Opened = true,
+})
+
+local selectedCrystal = "Blue Crystal"
+
+crystalSection:Dropdown({
+    Title = "💎 Select Crystal Tier 1",
+    Desc = "Choose crystal to open",
+    Icon = "gem",
+    Values = {
+        "Blue Crystal",
+        "Green Crystal",
+        "Frost Crystal",
+        "Mythical Crystal",
+        "Inferno Crystal",
+    },
+    Callback = function(value)
+        selectedCrystal = value
+    end
+})
+
+crystalSection:Toggle({
+    Title = "🔓 Auto Open Crystal",
+    Desc = "Automatically opens selected crystal",
+    Icon = "unlock",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoOpenCrystal = state
+        while _G.AutoOpenCrystal do
+            ReplicatedStorage.rEvents.openCrystalRemote:InvokeServer('openCrystal', selectedCrystal)
+            task.wait(1)
+        end
+    end
+})
+
+local selectedCrystalT2 = "Legend Crystal"
+
+crystalSection:Dropdown({
+    Title = "💎 Select Crystal Tier 2",
+    Desc = "Choose premium crystal",
+    Icon = "gem",
+    Values = {
+        "Legend Crystal",
+        "Muscle Elite Crystal",
+        "Galaxy Oracle Crystal",
+        "Jungle Crystal",
+    },
+    Callback = function(value)
+        selectedCrystalT2 = value
+    end
+})
+
+crystalSection:Toggle({
+    Title = "🔓 Auto Open Premium",
+    Desc = "Automatically opens premium crystal",
+    Icon = "unlock",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoOpenCrystal2 = state
+        while _G.AutoOpenCrystal2 do
+            ReplicatedStorage.rEvents.openCrystalRemote:InvokeServer('openCrystal', selectedCrystalT2)
+            task.wait(0.001)
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: AUTO BUY
+-- ═══════════════════════════════════════════════════════════
+local buyTab = Window:Tab({Title = "Auto Buy", Icon = "shopping-cart"})
+
+local miscBuySection = buyTab:Section({ 
+    Title = "💰 Purchases",
+    Box = false,
+    Opened = true,
+})
+
+local Button = miscBuySection:Button({
+    Title = "🛒 Unlock AutoLift",
+    Desc = "Unlock the AutoLift gamepass!",
+    Locked = false,
+    Callback = function()
+        local Players = game:GetService("Players")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+        local player = Players.LocalPlayer
+        local gamepassFolder = ReplicatedStorage:FindFirstChild("gamepassIds")
+        local ownedFolder = player:FindFirstChild("ownedGamepasses")
+
+        if not gamepassFolder or not ownedFolder then
+            warn("Error")
+            return
+        end
+
+        for _, gamepass in ipairs(gamepassFolder:GetChildren()) do
+            if not ownedFolder:FindFirstChild(gamepass.Name) then
+                local v = Instance.new("IntValue")
+                v.Name = gamepass.Name
+                v.Value = gamepass.Value
+                v.Parent = ownedFolder
+            end
+        end
+    end
+})
+
+miscBuySection:Toggle({
+    Title = "🎡 Auto Spin Wheel",
+    Desc = "Automatically spins the fortune wheel",
+    Icon = "disc",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        _G.AutoWheel = state
+        while _G.AutoWheel do
+            ReplicatedStorage.rEvents.openFortuneWheelRemote:InvokeServer('openFortuneWheel', ReplicatedStorage.fortuneWheelChances['Fortune Wheel'])
+            task.wait(1)
+        end
+    end
+})
+
+
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: PLAYER MODIFICATIONS
+-- ═══════════════════════════════════════════════════════════
+Window:Divider()
+local playerTab = Window:Tab({Title = "Player", Icon = "user"})
+
+local movementSection = playerTab:Section({ 
+    Title = "🏃 Movement",
+    Box = false,
+    Opened = true,
+})
+
+-- Garantir que State.Player existe
+State.Player = State.Player or {}
+State.Player.WalkspeedValue = State.Player.WalkspeedValue or 125
+State.Player.CustomSpeed = State.Player.CustomSpeed or false
+
+movementSection:Input({
+    Title = "⚡ Walkspeed Value",
+    Desc = "Set custom speed (Default: 125)",
+    Value = tostring(State.Player.WalkspeedValue),
+    Callback = function(value)
+        local numValue = tonumber(value)
+        if numValue then
+            State.Player.WalkspeedValue = numValue
+            
+            -- Atualiza em tempo real se já estiver ativo
+            if State.Player.CustomSpeed and player.Character then
+                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    humanoid.WalkSpeed = State.Player.WalkspeedValue
+                end
+            end
+        end
+    end
+})
+
+movementSection:Toggle({
+    Title = "🚀 Custom Speed",
+    Desc = "Enable custom walkspeed",
+    Icon = "gauge",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Player.CustomSpeed = state
+
+        -- Remove conexão anterior
+        if getgenv().SpeedConnection then
+            getgenv().SpeedConnection:Disconnect()
+            getgenv().SpeedConnection = nil
+        end
+
+        if state then
+            -- Loop que força o valor a cada frame (ESSENCIAL)
+            getgenv().SpeedConnection = RunService.Heartbeat:Connect(function()
+                if State.Player.CustomSpeed then
+                    local char = player.Character
+                    if char then
+                        local humanoid = char:FindFirstChildOfClass("Humanoid")
+                        if humanoid then
+                            humanoid.WalkSpeed = State.Player.WalkspeedValue
+                        end
+                    end
+                end
+            end)
+            
+            Notify({
+                Title = "🚀 Speed Activated",
+                Content = "Walkspeed set to " .. State.Player.WalkspeedValue,
+                Duration = 3
+            })
+        else
+            -- Restaura velocidade padrão
+            local char = player.Character
+            if char then
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    humanoid.WalkSpeed = 16
+                end
+            end
+        end
+    end
+})
+
+movementSection:Toggle({
+    Title = "🦘 Infinite Jump",
+    Desc = "Jump without limits",
+    Icon = "arrow-up",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Player.InfiniteJump = state
+        
+        -- Remove conexão anterior
+        if _G.InfiniteJumpConnection then
+            _G.InfiniteJumpConnection:Disconnect()
+            _G.InfiniteJumpConnection = nil
+        end
+        
+        if state then
+            _G.InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function()
+                if State.Player.InfiniteJump and player.Character then
+                    local humanoid = player.Character:FindFirstChild('Humanoid')
+                    if humanoid then
+                        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    end
+                end
+            end)
+        end
+    end
+})
+
+movementSection:Toggle({
+    Title = "👻 Noclip",
+    Desc = "Walk through walls and objects",
+    Icon = "ghost",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Player.Noclip = state
+        
+        -- Remove conexão anterior
+        if _G.NoclipConnection then
+            _G.NoclipConnection:Disconnect()
+            _G.NoclipConnection = nil
+        end
+        
+        if state then
+            _G.NoclipConnection = RunService.Stepped:Connect(function()
+                if State.Player.Noclip and player.Character then
+                    for _, part in pairs(player.Character:GetDescendants()) do
+                        if part:IsA('BasePart') and part.CanCollide then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+movementSection:Toggle({
+    Title = "🛡️ Anti-Knockback",
+    Desc = "Prevent being knocked back during combat",
+    Icon = "shield",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+        State.Player.AntiKnockback = state
+        if state then
+            EnableAntiKnockback()
+            Notify({
+                Title = "🛡️ Anti-Knockback Active",
+                Content = "You are now protected from knockback!",
+                Duration = 3
+            })
+        else
+            DisableAntiKnockback()
+        end
+    end
+})
+
+local utilitySection = playerTab:Section({ 
+    Title = "🛠️ Utility Features",
+    Box = false,
+    Opened = true,
+})
+
+utilitySection:Button({
+    Title = "🛡️ Anti-AFK Protection",
+    Desc = "Prevents being kicked for inactivity",
+    Icon = "shield",
+    Callback = function()
+        local vu = game:GetService("VirtualUser")
+        player.Idled:Connect(function()
+            vu:CaptureController()
+            vu:ClickButton2(Vector2.new(0, 0))
+        end)
+        Notify({
+            Title = "✅ Anti-AFK Active",
+            Content = "You will no longer be kicked for inactivity!",
+            Duration = 4
+        })
+    end
+})
+
+utilitySection:Toggle({
+    Title = "👻 Hide Frames",
+    Desc = "Toggle ON to hide frames",
+    Icon = "shield",
+    Callback = function()
+        p124 = not p124
+
+        for _, v in pairs(ReplicatedStorage:GetChildren()) do
+            if v:IsA("Frame") and v.Name:match("Frame$") then
+                v.Visible = not p124
+            end
+        end
+
+        Notify({
+            Title = p124 and "👻 Hidden Frames" or "✅ Frames Shown",
+            Content = p124 and "Frames hidden." or "Frames restored.",
+            Duration = 3
+        })
+    end
+})
+
+
+
+-- NEW: View Player System
+local viewSection = playerTab:Section({ 
+    Title = "Player Viewer",
+    Box = false,
+    Opened = true,
+})
+
+local selectedViewPlayer = ""
+local viewConnection = nil
+
+viewSection:Dropdown({
+    Title = "👤 Select Player to View",
+    Desc = "Choose a player to spectate",
+    Icon = "eye",
+    Values = (function()
+        local names = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player then
+                table.insert(names, p.Name)
+            end
+        end
+        return names
+    end)(),
+    Callback = function(value)
+        selectedViewPlayer = value
+    end
+})
+
+viewSection:Button({
+    Title = "👁️ Start Viewing",
+    Desc = "Spectate the selected player",
+    Icon = "video",
+    Callback = function()
+        local targetPlayer = Players:FindFirstChild(selectedViewPlayer)
+        if targetPlayer and targetPlayer.Character then
+            Workspace.CurrentCamera.CameraSubject = targetPlayer.Character:FindFirstChild("Humanoid")
+            
+            if viewConnection then
+                viewConnection:Disconnect()
+            end
+            
+            viewConnection = targetPlayer.CharacterAdded:Connect(function(char)
+                char:WaitForChild("Humanoid")
+                Workspace.CurrentCamera.CameraSubject = char.Humanoid
+            end)
+            
+            Notify({
+                Title = "👁️ Viewing Player",
+                Content = "Now spectating: " .. selectedViewPlayer,
+                Duration = 3
+            })
+        else
+            Notify({
+                Title = "❌ Error",
+                Content = "Player not found or has no character",
+                Duration = 3
+            })
+        end
+    end
+})
+
+viewSection:Button({
+    Title = "🔙 Stop Viewing",
+    Desc = "Return camera to your character",
+    Icon = "x-circle",
+    Callback = function()
+        if viewConnection then
+            viewConnection:Disconnect()
+            viewConnection = nil
+        end
+        
+        if player.Character and player.Character:FindFirstChild("Humanoid") then
+            Workspace.CurrentCamera.CameraSubject = player.Character.Humanoid
+            Notify({
+                Title = "✅ Camera Reset",
+                Content = "Returned to your character",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: TELEPORT
+-- ═══════════════════════════════════════════════════════════
+local teleportTab = Window:Tab({Title = "Teleport", Icon = "map"})
+
+local tpSection = teleportTab:Section({ 
+    Title = "🌍 Island Teleportation",
+    Box = false,
+    Opened = true,
+})
+
+local teleportLocations = {
+    ['🟢 Tiny Island'] = CFrame.new(-39.09, 5.99, 1886.13),
+    ['❄️ Frost Island'] = CFrame.new(-2623.02, 5.84, -409.07),
+    ['✨ Mythical Island'] = CFrame.new(2250.77, 5.84, 1073.22),
+    ['🔥 Infernal Island'] = CFrame.new(-6758.96, 5.84, -1284.91),
+    ['⭐ Legend Island'] = CFrame.new(4603.28, 989.99, -3897.86),
+    ['👑 Muscle King'] = CFrame.new(-8625.92, 15.69, -5730.47),
+    ['🌴 Ancient Jungle'] = CFrame.new(-8642.25, 6.27, 2380.50),
+}
+
+local selectedTeleportLocation = "🟢 Tiny Island"
+
+tpSection:Dropdown({
+    Title = "📍 Select Location",
+    Desc = "Choose where to teleport",
+    Icon = "map-pin",
+    Values = {
+        "🟢 Tiny Island",
+        "❄️ Frost Island",
+        "✨ Mythical Island",
+        "🔥 Infernal Island",
+        "⭐ Legend Island",
+        "👑 Muscle King",
+        "🌴 Ancient Jungle"
+    },
+    Callback = function(value)
+        selectedTeleportLocation = value
+    end
+})
+
+tpSection:Button({
+    Title = "🚀 Teleport Now",
+    Desc = "Instantly travel to selected location",
+    Icon = "send",
+    Callback = function()
+        if teleportLocations[selectedTeleportLocation] then
+            if TeleportTo(teleportLocations[selectedTeleportLocation]) then
+                Notify({
+                    Title = "✅ Teleported!",
+                    Content = "Successfully teleported to " .. selectedTeleportLocation,
+                    Duration = 3
+                })
+            else
+                Notify({
+                    Title = "❌ Failed",
+                    Content = "Character not found or invalid location",
+                    Duration = 3
+                })
+            end
+        end
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: MISC UTILITIES
+-- ═══════════════════════════════════════════════════════════
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local player = Players.LocalPlayer
+
+local miscTab = Window:Tab({
+    Title = "Utilities",
+    Icon = "gift"
+})
+
+local chestSection = miscTab:Section({ 
+    Title = "🎁 Auto Rewards",
+    Box = false,
+    Opened = true,
+})
+chestSection:Button({
+    Title = "🎁 Claim All Chests",
+    Desc = "Collect all Chests!",
+    Icon = "gift",
+    Callback = function()
+
+        local Players = game:GetService("Players")
+        local Workspace = game:GetService("Workspace")
+        local player = Players.LocalPlayer
+
+        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            return
+        end
+
+        local hrp = player.Character.HumanoidRootPart
+        local originalPosition = hrp.CFrame
+
+        -- Lista de baús no Workspace
+        local chests = {
+            Workspace:FindFirstChild("goldenChest"),
+            Workspace:FindFirstChild("enchantedChest"),
+            Workspace:FindFirstChild("magmaChest"),
+            Workspace:FindFirstChild("mythicalChest"),
+            Workspace:FindFirstChild("legendsChest"),
+            Workspace:FindFirstChild("jungleChest")
+        }
+
+        local claimed = 0
+
+        for _, chest in pairs(chests) do
+            if chest and chest:FindFirstChild("circleInner") then
+                pcall(function()
+                    -- Remove cooldown
+                    if player:FindFirstChild("alreadyCheckedForChests") then
+                        player.alreadyCheckedForChests:Destroy()
+                    end
+                    
+                    -- Teleporta para o baú
+                    hrp.CFrame = chest.circleInner.CFrame
+                    task.wait(0.5)
+                    
+                    claimed += 1
+                end)
+            end
+        end
+
+        -- Volta pra posição original
+        task.wait(0.5)
+        hrp.CFrame = originalPosition
+
+        WindUI:Notify({
+            Title = "💎 Collected chests",
+            Content = "Total: "..claimed,
+            Duration = 4,
+            Icon = "check"
+        })
+    end
+})
+
+
+-- REDEEM WORKING CODES
+chestSection:Button({
+    Title = "💎 Redeem all working codes",
+    Desc = "Redeem all game codes!",
+    Locked = false,
+    Callback = function()
+
+        local Event = game:GetService("ReplicatedStorage").rEvents.codeRemote
+
+        local codigos = {
+            "Launch250",
+            "SuperPunch100",
+            "SuperMuscle100",
+            "SkyAgility50",
+            "GalaxyCrystal50",
+            "Speedy50",
+            "MegaLift50",
+            "SpaceGems50",
+            "FrostGems10",
+            "EpicReward500"
+        }
+
+        local sucesso = 0
+        local falha = 0
+        local falhasList = {}
+
+        for _, codigo in ipairs(codigos) do
+            local ok = pcall(function()
+                Event:InvokeServer(codigo)
+            end)
+
+            if ok then
+                sucesso += 1
+            else
+                falha += 1
+                table.insert(falhasList, codigo)
+            end
+
+            task.wait(0.15)
+        end
+
+        local mensagem = "✔ Sucesso: "..sucesso.." | ❌ Falha: "..falha
+        if #falhasList > 0 then
+            mensagem ..= "\nFalharam: "..table.concat(falhasList, ", ")
+        end
+
+        WindUI:Notify({
+            Title = "✨ Codes finalizados",
+            Content = mensagem,
+            Duration = 5,
+            Icon = "diamond"
+        })
+    end
+})
+
+chestSection:Button({
+    Title = "🎁 Auto Claim Gifts",
+    Desc = "Claims all free gifts",
+    Icon = "gift",
+    Type = "Checkbox",
+    Value = false,
+    Callback = function(state)
+       local Event = game:GetService("ReplicatedStorage").rEvents.freeGiftClaimRemote
+
+for i = 1, 8 do
+    pcall(function()
+        Event:InvokeServer("claimGift", i)
+    end)
+    task.wait(0.2)
+end
+
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                TAB: STATS TRACKER (AUTO)
+-- ═══════════════════════════════════════════════════════════
+Window:Divider()
+local statsTab = Window:Tab({ Title = "Stats", Icon = "chart-column" })
+
+local statsSection = statsTab:Section({
+    Title = "📈 Statistics Tracker",
+    Box = false,
+    Opened = true,
+})
+
+-- =========================
+-- Session Data
+-- =========================
+local sessionData = {
+    startTime = os.time(),
+    stats = {},
+}
+
+-- =========================
+-- Helpers
+-- =========================
+local function getStats()
+    local ls = player:FindFirstChild("leaderstats")
+    if not ls then return nil end
+
+    return {
+        Kills = ls:FindFirstChild("Kills"),
+        Strength = ls:FindFirstChild("Strength"),
+        Rebirths = ls:FindFirstChild("Rebirths"),
+        Durability = player:FindFirstChild("Durability")
+    }
+end
+
+local function startSession()
+    local stats = getStats()
+    if not stats or not stats.Kills or not stats.Strength or not stats.Durability then
+        return false
+    end
+
+    sessionData.startTime = os.time()
+    sessionData.stats = {
+        Kills = stats.Kills.Value,
+        Strength = stats.Strength.Value,
+        Durability = stats.Durability.Value
+    }
+    return true
+end
+
+-- inicia automaticamente (sem botão, sem choro)
+task.spawn(function()
+    repeat task.wait() until startSession()
+end)
+
+local function getElapsed()
+    local t = os.time() - sessionData.startTime
+    return {
+        raw = t,
+        h = math.floor(t / 3600),
+        m = math.floor((t % 3600) / 60),
+        s = t % 60
+    }
+end
+
+-- =========================
+-- UI
+-- =========================
+statsSection:Paragraph({
+    Title = "📊 Auto Session",
+    Desc = "Tracking starts automatically when the script runs"
+})
+
+statsSection:Button({
+    Title = "📊 Show Statistics",
+    Icon = "activity",
+    Callback = function()
+        local stats = getStats()
+        if not stats then return end
+
+        local time = getElapsed()
+
+        Notify({
+            Title = "📊 Session Statistics",
+            Content = string.format(
+                "⏱️ %02d:%02d:%02d\n\n" ..
+                "💀 Kills: %s (+%s)\n" ..
+                "💪 Strength: %s (+%s)\n" ..
+                "🛡️ Durability: %s (+%s)\n" ..
+                "🔄 Rebirths: %s",
+                time.h, time.m, time.s,
+                FormatNumber(stats.Kills.Value),
+                FormatNumber(stats.Kills.Value - sessionData.stats.Kills),
+                FormatNumber(stats.Strength.Value),
+                FormatNumber(stats.Strength.Value - sessionData.stats.Strength),
+                FormatNumber(stats.Durability.Value),
+                FormatNumber(stats.Durability.Value - sessionData.stats.Durability),
+                FormatNumber(stats.Rebirths.Value)
+            ),
+            Duration = 8
+        })
+    end
+})
+
+statsSection:Button({
+    Title = "📈 Efficiency Stats",
+    Icon = "trending-up",
+    Callback = function()
+        local stats = getStats()
+        if not stats then return end
+
+        local time = getElapsed()
+        if time.raw < 300 then
+            Notify({
+                Title = "⏳ Calm down",
+                Content = "Wait at least 5 minutes.",
+                Duration = 3
+            })
+            return
+        end
+
+        local hours = time.raw / 3600
+
+        Notify({
+            Title = "📈 Efficiency",
+            Content = string.format(
+                "⏱️ %.2f hours\n\n" ..
+                "💀 Kills/hr: %s\n" ..
+                "💪 Strength/hr: %s",
+                hours,
+                FormatNumber(math.floor((stats.Kills.Value - sessionData.stats.Kills) / hours)),
+                FormatNumber(math.floor((stats.Strength.Value - sessionData.stats.Strength) / hours))
+            ),
+            Duration = 6
+        })
+    end
+})
+
+statsSection:Button({
+    Title = "🔄 Reset Session",
+    Icon = "refresh-cw",
+    Callback = function()
+        startSession()
+        Notify({
+            Title = "🔄 Session Reset",
+            Content = "New session started from current stats.",
+            Duration = 3
+        })
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: PERFORMANCE
+-- ═══════════════════════════════════════════════════════════
+local perfTab = Window:Tab({Title = "Performance", Icon = "cpu"})
+
+local graphicsSection = perfTab:Section({ 
+    Title = "🎨 Graphics Optimization",
+    Box = false,
+    Opened = true,
+})
+
+graphicsSection:Paragraph({
+    Title = "Boost FPS by reducing graphics quality and effects"
+})
+
+graphicsSection:Button({
+    Title = "🖼️ Remove All Textures",
+    Desc = "Delete textures and decals",
+    Icon = "image-off",
+    Callback = function()
+        local count = 0
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA('Decal') or obj:IsA('Texture') then
+                obj.Transparency = 1
+                count = count + 1
+            end
+        end
+        Notify({
+            Title = "✅ Textures Removed",
+            Content = "Removed " .. count .. " textures!",
+            Duration = 3
+        })
+    end
+})
+
+graphicsSection:Button({
+    Title = "🌑 Disable Shadows",
+    Desc = "Turn off all shadow rendering",
+    Icon = "moon",
+    Callback = function()
+        Lighting.GlobalShadows = false
+        Notify({
+            Title = "✅ Shadows Disabled",
+            Content = "Shadow rendering has been disabled!",
+            Duration = 3
+        })
+    end
+})
+
+graphicsSection:Button({
+    Title = "🚀 Ultra FPS Booster",
+    Desc = "Maximum performance mode",
+    Icon = "zap-off",
+    Callback = function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 100000
+        
+        local removed = 0
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA('ParticleEmitter') or obj:IsA('Trail') or obj:IsA('Smoke') or obj:IsA('Fire') or obj:IsA('Sparkles') then
+                obj:Destroy()
+                removed = removed + 1
+            elseif obj:IsA('Decal') or obj:IsA('Texture') then
+                obj:Destroy()
+                removed = removed + 1
+            elseif obj:IsA('Part') or obj:IsA('MeshPart') then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.Reflectance = 0
+            end
+        end
+        
+        Notify({
+            Title = "🚀 Ultra FPS Active!",
+            Content = "Removed " .. removed .. " effects. FPS should be maximized!",
+            Duration = 5
+        })
+    end
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: SETTINGS
+-- ═══════════════════════════════════════════════════════════
+local settingsTab = Window:Tab({Title = "Settings", Icon = "settings"})
+
+local uiSection = settingsTab:Section({ 
+    Title = "🎨 UI Configuration",
+    Box = false,
+    Opened = true,
+})
+
+uiSection:Keybind({
+    Title = "🔑 Toggle UI Keybind",
+    Desc = "Set hotkey to show/hide menu",
+    Value = "G",
+    Callback = function(v)
+        Window:SetToggleKey(Enum.KeyCode[v])
+    end
+})
+
+uiSection:Paragraph({
+    Title = "Use the keybind above to quickly toggle the UI visibility"
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    TAB: CREDITS & INFO
+-- ═══════════════════════════════════════════════════════════
+Window:Divider()
+local creditsTab = Window:Tab({Title = "Credits", Icon = "heart"})
+
+local creatorSection = creditsTab:Section({ 
+    Title = "👨‍💻 Creator",
+    Box = false,
+    Opened = true,
+})
+
+creatorSection:Paragraph({
+    Title = "🩸 MZX",
+    Desc = "Original Script Creator"
+})
+
+local socialSection = creditsTab:Section({ 
+    Title = "🔔 Discord",
+    Box = false,
+    Opened = true,
+})
+
+socialSection:Button({
+    Title = "📋 Copy Discord link",
+    Desc = "Get updates and report bugs",
+    Icon = "copy",
+    Callback = function()
+        setclipboard("https://discord.gg/NuW8BsNray")
+        Notify({
+            Title = "✅ Copied!",
+            Content = "Discord link copied to clipboard!\nJoin discord for updates and support.",
+            Duration = 4,
+        })
+    end
+})
+
+local versionSection = creditsTab:Section({ 
+    Title = "📦 Version Info",
+    Box = false,
+    Opened = true,
+})
+
+versionSection:Paragraph({
+    Title = "Version 1.0.0",
+    Desc = "Muscle Legends\nLast Updated: January 2026\n\n✨ New Features:\n• Auto Claim All Chests\n• Anti-Knockback System\n• Player Viewer/Spectate\n• Session Stats Tracker\n• Auto Weight Training\n• Enhanced Performance\n• Premium UI Design"
+})
+
+-- ═══════════════════════════════════════════════════════════
+--                    INITIALIZATION & AUTO-UPDATES
+-- ═══════════════════════════════════════════════════════════
+
+-- Character respawn handler for anti-knockback
+player.CharacterAdded:Connect(function(char)
+    if State.Player.AntiKnockback then
+        char:WaitForChild("HumanoidRootPart")
+        task.wait(1)
+        EnableAntiKnockback()
+    end
+end)
+
+-- Welcome notification
+task.wait(1)
+Notify({
+    Title = "🩸 Criminal",
+    Content = "Free v1.0.0\nAll systems ready!\n\nCriminal on top",
+    Duration = 6,
+})
+
+-- Tips notification
+task.spawn(function()
+    task.wait(300)
+    Notify({
+        Title = "💡 Pro Tip",
+        Content = "Enable Anti-Knockback when farming rocks for maximum efficiency!",
+        Duration = 5,
+    })
+end)
